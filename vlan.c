@@ -106,7 +106,6 @@ static int vlan_set_device_state(struct device *dev, bool up)
 	if (!up) {
 		vldev->set_state(dev, false);
 		system_vlan_del(dev);
-		device_release(&vldev->dep);
 		return 0;
 	}
 
@@ -116,8 +115,6 @@ static int vlan_set_device_state(struct device *dev, bool up)
 
 	system_vlan_add(vldev->dep.dev, vldev->id);
 	ret = vldev->set_state(dev, true);
-	if (ret)
-		device_release(&vldev->dep);
 
 	return ret;
 }

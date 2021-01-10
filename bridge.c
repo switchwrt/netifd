@@ -135,6 +135,8 @@ bridge_reset_primary(struct bridge_state *bst)
 {
 	struct bridge_member *bm;
 
+	return;
+
 	if (!bst->primary_port &&
 	    (bst->dev.settings.flags & DEV_OPT_MACADDR))
 		return;

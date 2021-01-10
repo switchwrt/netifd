@@ -90,6 +90,7 @@ static void handle_hotplug_event(struct uloop_fd *u, unsigned int events);
 static int system_add_proto_tunnel(const char *name, const uint8_t proto,
 					const unsigned int link, struct blob_attr **tb);
 static int __system_del_ip_tunnel(const char *name, struct blob_attr **tb);
+static bool system_is_bridge(const char *name, char *buf, int buflen);
 
 static char dev_buf[256];
 
@@ -430,11 +431,6 @@ static void system_bridge_set_startup_query_interval(struct device *dev, const c
 			      dev->ifname, val);
 }
 
-static void system_bridge_set_stp_state(struct device *dev, const char *val)
-{
-	system_set_dev_sysctl("/sys/devices/virtual/net/%s/bridge/stp_state", dev->ifname, val);
-}
-
 static void system_bridge_set_forward_delay(struct device *dev, const char *val)
 {
 	system_set_dev_sysctl("/sys/devices/virtual/net/%s/bridge/forward_delay", dev->ifname, val);
@@ -592,7 +588,7 @@ static int cb_rtnl_event(struct nl_msg *msg, void *arg)
 	struct nlmsghdr *nh = nlmsg_hdr(msg);
 	struct nlattr *nla[__IFLA_MAX];
 	int link_state = 0;
-	char buf[10];
+	char buf[64];
 
 	if (nh->nlmsg_type != RTM_NEWLINK)
 		goto out;
@@ -608,8 +604,11 @@ static int cb_rtnl_event(struct nl_msg *msg, void *arg)
 	if (!system_get_dev_sysctl("/sys/class/net/%s/carrier", dev->ifname, buf, sizeof(buf)))
 		link_state = strtoul(buf, NULL, 0);
 
+	if (system_is_bridge(dev->ifname, buf, sizeof buf))
+		link_state = 1;
+
 	if (dev->type == &simple_device_type)
-		device_set_present(dev, true);
+	device_set_present(dev, true);
 
 	device_set_link(dev, link_state ? true : false);
 
@@ -750,7 +749,7 @@ static int system_rtnl_call(struct nl_msg *msg)
 
 int system_bridge_delbr(struct device *bridge)
 {
-	return ioctl(sock_ioctl, SIOCBRDELBR, bridge->ifname);
+	return 0;
 }
 
 static int system_bridge_if(const char *bridge, struct device *dev, int cmd, void *data)
@@ -1127,12 +1126,6 @@ void system_if_clear_state(struct device *dev)
 
 	system_if_flags(dev->ifname, 0, IFF_UP);
 
-	if (system_is_bridge(dev->ifname, buf, sizeof(buf))) {
-		D(SYSTEM, "Delete existing bridge named '%s'\n", dev->ifname);
-		system_bridge_delbr(dev);
-		return;
-	}
-
 	bridge = system_get_bridge(dev->ifname, buf, sizeof(buf));
 	if (bridge) {
 		D(SYSTEM, "Remove device '%s' from bridge '%s'\n", dev->ifname, bridge);
@@ -1233,9 +1226,8 @@ int system_bridge_addbr(struct device *bridge, struct bridge_config *cfg)
 	char buf[64];
 
 	if (ioctl(sock_ioctl, SIOCBRADDBR, bridge->ifname) < 0)
-		return -1;
-
-	system_bridge_set_stp_state(bridge, cfg->stp ? "1" : "0");
+		if (errno != EEXIST)
+			return -1;
 
 	snprintf(buf, sizeof(buf), "%lu", sec_to_jiffies(cfg->forward_delay));
 	system_bridge_set_forward_delay(bridge, buf);
